@@ -16,14 +16,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
-      - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y pandoc
+        with:
+          sparse-checkout: |
+            documentation
+            build-docs.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Get latest pandoc version
+        id: pandoc-version
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/jgm/pandoc/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pandoc
+        id: cache-pandoc
+        uses: actions/cache@v4
+        with:
+          path: pandoc.deb
+          key: pandoc-${{ steps.pandoc-version.outputs.version }}
+
+      - name: Download pandoc
+        if: steps.cache-pandoc.outputs.cache-hit != 'true'
+        run: curl -sLo pandoc.deb "https://github.com/jgm/pandoc/releases/download/${{ steps.pandoc-version.outputs.version }}/pandoc-${{ steps.pandoc-version.outputs.version }}-1-amd64.deb"
+
+      - name: Install pandoc
+        run: sudo dpkg -i pandoc.deb
 
       - name: Build
         run: ./build-docs.sh
@@ -33,16 +58,9 @@ jobs:
         with:
           path: './dist/docs'
 
-  deploy:
-    needs: build
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
       - name: Setup Pages
         uses: actions/configure-pages@v4
-        
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
